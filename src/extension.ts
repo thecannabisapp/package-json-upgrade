@@ -115,10 +115,16 @@ const checkCurrentFiles = (showDecorations: boolean) => {
 }
 
 const activateCodeActionStuff = (context: vscode.ExtensionContext) => {
+  const updateAction = new UpdateAction()
+  context.subscriptions.push(
+    vscode.languages.registerCodeActionsProvider({ pattern: '**/package.json' }, updateAction, {
+      providedCodeActionKinds: UpdateAction.providedCodeActionKinds,
+    }),
+  )
   context.subscriptions.push(
     vscode.languages.registerCodeActionsProvider(
-      { pattern: '**/package.json' },
-      new UpdateAction(),
+      [{ pattern: '**/pnpm-workspace.yaml' }, { pattern: '**/pnpm-workspace.yml' }],
+      updateAction,
       {
         providedCodeActionKinds: UpdateAction.providedCodeActionKinds,
       },

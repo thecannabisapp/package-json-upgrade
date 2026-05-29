@@ -3,8 +3,9 @@ import * as vscode from 'vscode'
 import { getChangelogUrl } from './changelog'
 import { OPEN_URL_COMMAND } from './extension'
 import { getCachedNpmData, getExactVersion, getPossibleUpgrades } from './npm'
-import { getDependencyFromLine, isPackageJson } from './packageJson'
+import { getDependencyFromLine, isPackageJson, isPnpmWorkspaceFile } from './packageJson'
 import { replaceLastOccuranceOf } from './util/util'
+import { getWorkspaceDependencyFromLine } from './workspace'
 
 export class UpdateAction implements vscode.CodeActionProvider {
   public static readonly providedCodeActionKinds = [vscode.CodeActionKind.QuickFix]
@@ -13,7 +14,7 @@ export class UpdateAction implements vscode.CodeActionProvider {
     document: vscode.TextDocument,
     range: vscode.Range,
   ): vscode.CodeAction[] | undefined {
-    if (isPackageJson(document) === false) {
+    if (isPackageJson(document) === false && isPnpmWorkspaceFile(document) === false) {
       return
     }
 
@@ -21,7 +22,10 @@ export class UpdateAction implements vscode.CodeActionProvider {
       return
     }
 
-    const dep = getDependencyFromLine(document.getText(), range.start.line, document.uri.fsPath)
+    const text = document.getText()
+    const dep = isPnpmWorkspaceFile(document)
+      ? getWorkspaceDependencyFromLine(text, range.start.line)
+      : getDependencyFromLine(text, range.start.line, document.uri.fsPath)
     // Skip quick-fix upgrades for missing/workspace/catalog dependencies
     if (dep === undefined || dep.isWorkspace === true || dep.isCatalog === true) {
       return

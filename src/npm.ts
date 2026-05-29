@@ -1,3 +1,4 @@
+import * as yaml from 'js-yaml'
 import * as npmRegistryFetch from 'npm-registry-fetch'
 import {
   coerce,
@@ -17,7 +18,7 @@ import { getConfig } from './config'
 import { logError } from './log'
 import { getNpmConfig } from './npmConfig'
 import { AsyncState, Dict, StrictDict } from './types'
-import { resolveCatalogVersion, resolveWorkspaceVersion } from './workspace'
+import { isRecord, resolveCatalogVersion, resolveWorkspaceVersion } from './workspace'
 
 export interface NpmLoader<T> {
   asyncstate: AsyncState
@@ -254,6 +255,68 @@ const isVersionIgnored = (version: VersionData, dependencyName: string, ignoredV
     return true
   }
   return satisfies(version.version, ignoredVersion)
+}
+
+export const refreshWorkspaceFileData = (
+  content: string,
+  workspaceFilePath: string,
+): Promise<void>[] => {
+  const cacheCutoff = new Date(new Date().getTime() - 1000 * 60 * 120)
+
+  try {
+    const parsed = yaml.load(content)
+    if (!isRecord(parsed)) {
+      return []
+    }
+
+    const dependencies: Record<string, string> = {}
+
+    if (isRecord(parsed.catalog)) {
+      for (const [name, version] of Object.entries(parsed.catalog)) {
+        if (typeof version === 'string') {
+          dependencies[name] = version
+        }
+      }
+    }
+
+    if (isRecord(parsed.catalogs)) {
+      for (const entries of Object.values(parsed.catalogs)) {
+        if (isRecord(entries)) {
+          for (const [name, version] of Object.entries(entries)) {
+            if (typeof version === 'string') {
+              dependencies[name] = version
+            }
+          }
+        }
+      }
+    }
+
+    const promises = Object.entries(dependencies)
+      .filter(([_dependencyName, version]) => {
+        if (valid(coerce(version)) == null) {
+          return false
+        }
+        return true
+      })
+      .map(([dependencyName, _version]) => {
+        const cache = npmCache[dependencyName]
+        if (
+          cache === undefined ||
+          cache.asyncstate === AsyncState.NotStarted ||
+          (cache.item !== undefined && cache.item.date.getTime() < cacheCutoff.getTime())
+        ) {
+          return fetchNpmData(dependencyName, workspaceFilePath)
+        } else {
+          return npmCache[dependencyName]?.promise
+        }
+      })
+      .filter((p): p is Promise<void> => p !== undefined)
+
+    return promises
+  } catch (_) {
+    console.warn(`Failed to parse pnpm-workspace file: ${workspaceFilePath}`)
+    return [Promise.resolve()]
+  }
 }
 
 export const refreshPackageJsonData = (

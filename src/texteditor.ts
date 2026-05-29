@@ -4,9 +4,20 @@ import { TextEditorDecorationType } from 'vscode'
 import { getConfig } from './config'
 import { decorateDiscreet, getDecoratorForUpdate, getUpdateDescription } from './decorations'
 import { getIgnorePattern, isDependencyIgnored } from './ignorePattern'
-import { getCachedNpmData, getPossibleUpgrades, refreshPackageJsonData } from './npm'
-import { DependencyGroups, getDependencyInformation, isPackageJson } from './packageJson'
+import {
+  getCachedNpmData,
+  getPossibleUpgrades,
+  refreshPackageJsonData,
+  refreshWorkspaceFileData,
+} from './npm'
+import {
+  DependencyGroups,
+  getDependencyInformation,
+  isPackageJson,
+  isPnpmWorkspaceFile,
+} from './packageJson'
 import { AsyncState } from './types'
+import { getWorkspaceFileDependencyInformation } from './workspace'
 
 interface DecorationWrapper {
   line: number
@@ -30,7 +41,7 @@ export const handleFileDecoration = (document: vscode.TextDocument) => {
     return
   }
 
-  if (!isPackageJson(document)) {
+  if (!isPackageJson(document) && !isPnpmWorkspaceFile(document)) {
     return
   }
 
@@ -42,14 +53,19 @@ export const handleFileDecoration = (document: vscode.TextDocument) => {
 
 const loadDecoration = async (document: vscode.TextDocument, startTime: number) => {
   const text = document.getText()
-  const dependencyGroups = getDependencyInformation(text, document.uri.fsPath)
+  const isWorkspaceFile = isPnpmWorkspaceFile(document)
+  const dependencyGroups = isWorkspaceFile
+    ? getWorkspaceFileDependencyInformation(text)
+    : getDependencyInformation(text, document.uri.fsPath)
 
   const textEditor = getTextEditorFromDocument(document)
   if (textEditor === undefined) {
     return
   }
 
-  const promises = refreshPackageJsonData(document.getText(), document.uri.fsPath)
+  const promises = isWorkspaceFile
+    ? refreshWorkspaceFileData(document.getText(), document.uri.fsPath)
+    : refreshPackageJsonData(document.getText(), document.uri.fsPath)
 
   try {
     await Promise.race([...promises, Promise.resolve()])

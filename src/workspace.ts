@@ -3,6 +3,8 @@ import * as yaml from 'js-yaml'
 import * as path from 'path'
 import { globSync } from 'tinyglobby'
 
+import type { Dependency, DependencyGroups } from './packageJson'
+
 interface WorkspaceCache {
   packages: Map<string, string>
   mtime: number
@@ -245,6 +247,107 @@ const parseWorkspaceCatalogs = (content: string): WorkspaceCatalog => {
   return { default: catalog, named }
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => {
+export const getWorkspaceFileDependencyInformation = (content: string): DependencyGroups[] => {
+  try {
+    const parsed = yaml.load(content)
+    if (!isRecord(parsed)) {
+      return []
+    }
+
+    const lines = content.split('\n')
+    const usedLines = new Set<number>()
+
+    const findLine = (name: string, version: string): number => {
+      const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const regex = new RegExp(
+        `^\\s*["']?${escapedName}["']?:\\s*["']?${escapedVersion}["']?\\s*(?:#.*)?$`,
+      )
+      for (let i = 0; i < lines.length; i++) {
+        if (!usedLines.has(i) && regex.test(lines[i])) {
+          usedLines.add(i)
+          return i
+        }
+      }
+      return -1
+    }
+
+    const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+    const findSectionLine = (name: string, parentName?: string): number => {
+      const regex = new RegExp(`^\\s*${escapeRegex(name)}:\\s*(?:#.*)?$`)
+      let startIndex = 0
+      if (parentName !== undefined) {
+        const parentRegex = new RegExp(`^\\s*${escapeRegex(parentName)}:\\s*(?:#.*)?$`)
+        startIndex = lines.findIndex((line) => parentRegex.test(line))
+        if (startIndex === -1) {
+          return -1
+        }
+        startIndex += 1
+      }
+      for (let i = startIndex; i < lines.length; i++) {
+        if (regex.test(lines[i])) {
+          return i
+        }
+      }
+      return -1
+    }
+
+    const groups: DependencyGroups[] = []
+
+    if (isRecord(parsed.catalog)) {
+      const deps: Dependency[] = []
+      for (const [name, version] of Object.entries(parsed.catalog)) {
+        if (typeof version === 'string') {
+          const line = findLine(name, version)
+          if (line !== -1) {
+            deps.push({ dependencyName: name, currentVersion: version, line })
+          }
+        }
+      }
+      const sectionLine = findSectionLine('catalog')
+      if (deps.length > 0 && sectionLine !== -1) {
+        groups.push({ startLine: sectionLine, deps })
+      }
+    }
+
+    if (isRecord(parsed.catalogs)) {
+      for (const [catalogName, entries] of Object.entries(parsed.catalogs)) {
+        if (isRecord(entries)) {
+          const deps: Dependency[] = []
+          for (const [name, version] of Object.entries(entries)) {
+            if (typeof version === 'string') {
+              const line = findLine(name, version)
+              if (line !== -1) {
+                deps.push({ dependencyName: name, currentVersion: version, line })
+              }
+            }
+          }
+          const sectionLine = findSectionLine(catalogName, 'catalogs')
+          if (deps.length > 0 && sectionLine !== -1) {
+            groups.push({ startLine: sectionLine, deps })
+          }
+        }
+      }
+    }
+
+    return groups
+  } catch {
+    return []
+  }
+}
+
+export const getWorkspaceDependencyFromLine = (
+  content: string,
+  line: number,
+): Dependency | undefined => {
+  const dependencies = getWorkspaceFileDependencyInformation(content)
+    .map((d) => d.deps)
+    .flat()
+
+  return dependencies.find((d) => d.line === line)
+}
+
+export const isRecord = (value: unknown): value is Record<string, unknown> => {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }

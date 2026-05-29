@@ -2,8 +2,9 @@ import * as vscode from 'vscode'
 
 import { getIgnorePattern, isDependencyIgnored } from './ignorePattern'
 import { getCachedNpmData, getExactVersion, getLatestVersion } from './npm'
-import { getDependencyInformation, isPackageJson } from './packageJson'
+import { getDependencyInformation, isPackageJson, isPnpmWorkspaceFile } from './packageJson'
 import { replaceLastOccuranceOf } from './util/util'
+import { getWorkspaceFileDependencyInformation } from './workspace'
 
 export interface UpdateEdit {
   range: vscode.Range
@@ -17,12 +18,16 @@ export const updateAll = (textEditor?: vscode.TextEditor): UpdateEdit[] => {
 
   const document = textEditor.document
 
-  if (isPackageJson(document)) {
+  if (isPackageJson(document) || isPnpmWorkspaceFile(document)) {
     const ignorePatterns = getIgnorePattern()
 
-    const dependencies = getDependencyInformation(document.getText(), document.uri.fsPath)
-      .map((d) => d.deps)
-      .flat()
+    const dependencies = isPnpmWorkspaceFile(document)
+      ? getWorkspaceFileDependencyInformation(document.getText())
+          .map((d) => d.deps)
+          .flat()
+      : getDependencyInformation(document.getText(), document.uri.fsPath)
+          .map((d) => d.deps)
+          .flat()
     const edits: UpdateEdit[] = dependencies
       .map((dep) => {
         const lineText = document.lineAt(dep.line).text

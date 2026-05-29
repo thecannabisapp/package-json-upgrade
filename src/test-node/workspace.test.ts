@@ -3,7 +3,12 @@ import { before, describe, test } from 'node:test'
 import * as assert from 'assert'
 import * as path from 'path'
 
-import { clearWorkspaceCache, resolveCatalogVersion, resolveWorkspaceVersion } from '../workspace'
+import {
+  clearWorkspaceCache,
+  getWorkspaceFileDependencyInformation,
+  resolveCatalogVersion,
+  resolveWorkspaceVersion,
+} from '../workspace'
 
 const testdataDir = path.resolve('./src/test-node/testdata')
 const catalogWorkspaceDir = path.resolve('./src/test-node/testdata/catalog-workspace')
@@ -222,5 +227,154 @@ describe('workspace', () => {
       path.join(testdataDir, 'ws-invalid', 'packages', 'consumer', 'package.json'),
     )
     assert.strictEqual(catalogResult, undefined)
+  })
+
+  test('should extract catalog dependencies from workspace file', () => {
+    const groups = getWorkspaceFileDependencyInformation(`packages:
+  - 'packages/*'
+catalog:
+  react: ^18.0.0
+  lodash: ^4.17.0
+`)
+
+    assert.strictEqual(groups.length, 1)
+    assert.strictEqual(groups[0].startLine, 2)
+    assert.strictEqual(groups[0].deps.length, 2)
+
+    const react = groups[0].deps.find((d) => d.dependencyName === 'react')
+    assert.ok(react)
+    assert.strictEqual(react.currentVersion, '^18.0.0')
+    assert.strictEqual(react.line, 3)
+
+    const lodash = groups[0].deps.find((d) => d.dependencyName === 'lodash')
+    assert.ok(lodash)
+    assert.strictEqual(lodash.currentVersion, '^4.17.0')
+    assert.strictEqual(lodash.line, 4)
+  })
+
+  test('should extract named catalog dependencies from workspace file', () => {
+    const groups = getWorkspaceFileDependencyInformation(`catalogs:
+  legacy:
+    react: ^17.0.2
+    react-dom: ^17.0.2
+`)
+
+    assert.strictEqual(groups.length, 1)
+    assert.strictEqual(groups[0].startLine, 1)
+    assert.strictEqual(groups[0].deps.length, 2)
+
+    const react = groups[0].deps.find((d) => d.dependencyName === 'react')
+    assert.ok(react)
+    assert.strictEqual(react.currentVersion, '^17.0.2')
+    assert.strictEqual(react.line, 2)
+
+    const reactDom = groups[0].deps.find((d) => d.dependencyName === 'react-dom')
+    assert.ok(reactDom)
+    assert.strictEqual(reactDom.currentVersion, '^17.0.2')
+    assert.strictEqual(reactDom.line, 3)
+  })
+
+  test('should extract both catalog and named catalogs', () => {
+    const groups = getWorkspaceFileDependencyInformation(`catalog:
+  react: ^18.0.0
+catalogs:
+  legacy:
+    react: ^17.0.2
+`)
+
+    assert.strictEqual(groups.length, 2)
+
+    const catalogGroup = groups.find((g) => g.startLine === 0)
+    assert.ok(catalogGroup)
+    assert.strictEqual(catalogGroup.deps.length, 1)
+    assert.strictEqual(catalogGroup.deps[0].dependencyName, 'react')
+    assert.strictEqual(catalogGroup.deps[0].currentVersion, '^18.0.0')
+
+    const legacyGroup = groups.find((g) => g.startLine === 3)
+    assert.ok(legacyGroup)
+    assert.strictEqual(legacyGroup.deps.length, 1)
+    assert.strictEqual(legacyGroup.deps[0].dependencyName, 'react')
+    assert.strictEqual(legacyGroup.deps[0].currentVersion, '^17.0.2')
+  })
+
+  test('should handle workspace file with comments and mixed quotes', () => {
+    const groups = getWorkspaceFileDependencyInformation(`packages:
+  - 'packages/*'
+# main deps
+catalog:
+  react: ^18.0.0
+  "lodash": '^4.17.0'
+`)
+
+    assert.strictEqual(groups.length, 1)
+    assert.strictEqual(groups[0].deps.length, 2)
+
+    const react = groups[0].deps.find((d) => d.dependencyName === 'react')
+    assert.ok(react)
+    assert.strictEqual(react.line, 4)
+
+    const lodash = groups[0].deps.find((d) => d.dependencyName === 'lodash')
+    assert.ok(lodash)
+    assert.strictEqual(lodash.line, 5)
+  })
+
+  test('should return empty for invalid yaml', () => {
+    const groups = getWorkspaceFileDependencyInformation('this is not { valid yaml ::::')
+    assert.strictEqual(groups.length, 0)
+  })
+
+  test('should return empty for workspace file without catalogs', () => {
+    const groups = getWorkspaceFileDependencyInformation(`packages:
+  - 'packages/*'
+`)
+    assert.strictEqual(groups.length, 0)
+  })
+
+  test('should not confuse catalog name with dependency name in another section', () => {
+    const groups = getWorkspaceFileDependencyInformation(`catalog:
+  legacy: ^1.0.0
+catalogs:
+  legacy:
+    react: ^18.0.0
+`)
+
+    assert.strictEqual(groups.length, 2)
+
+    const catalogGroup = groups.find((g) => g.startLine === 0)
+    assert.ok(catalogGroup)
+    assert.strictEqual(catalogGroup.deps.length, 1)
+    assert.strictEqual(catalogGroup.deps[0].dependencyName, 'legacy')
+    assert.strictEqual(catalogGroup.deps[0].currentVersion, '^1.0.0')
+
+    const legacyGroup = groups.find((g) => g.startLine === 3)
+    assert.ok(legacyGroup)
+    assert.strictEqual(legacyGroup.deps.length, 1)
+    assert.strictEqual(legacyGroup.deps[0].dependencyName, 'react')
+    assert.strictEqual(legacyGroup.deps[0].currentVersion, '^18.0.0')
+  })
+
+  test('should deduplicate lines when same dependency appears in catalog and catalogs with same version', () => {
+    const groups = getWorkspaceFileDependencyInformation(`catalog:
+  react: ^18.0.0
+catalogs:
+  legacy:
+    react: ^18.0.0
+`)
+
+    assert.strictEqual(groups.length, 2)
+
+    const catalogGroup = groups.find((g) => g.startLine === 0)
+    assert.ok(catalogGroup)
+    assert.strictEqual(catalogGroup.deps.length, 1)
+    assert.strictEqual(catalogGroup.deps[0].dependencyName, 'react')
+    assert.strictEqual(catalogGroup.deps[0].currentVersion, '^18.0.0')
+    assert.strictEqual(catalogGroup.deps[0].line, 1)
+
+    const legacyGroup = groups.find((g) => g.startLine === 3)
+    assert.ok(legacyGroup)
+    assert.strictEqual(legacyGroup.deps.length, 1)
+    assert.strictEqual(legacyGroup.deps[0].dependencyName, 'react')
+    assert.strictEqual(legacyGroup.deps[0].currentVersion, '^18.0.0')
+    assert.strictEqual(legacyGroup.deps[0].line, 4)
   })
 })

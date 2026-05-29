@@ -17,6 +17,15 @@ export interface Dependency {
   isCatalog?: boolean
 }
 
+export const isPnpmWorkspaceFile = (document: vscode.TextDocument) => {
+  return (
+    document.fileName.endsWith('/pnpm-workspace.yaml') ||
+    document.fileName.endsWith('\\pnpm-workspace.yaml') ||
+    document.fileName.endsWith('/pnpm-workspace.yml') ||
+    document.fileName.endsWith('\\pnpm-workspace.yml')
+  )
+}
+
 export const getDependencyFromLine = (
   jsonAsString: string,
   line: number,

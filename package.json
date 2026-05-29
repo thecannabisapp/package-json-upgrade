@@ -26,7 +26,8 @@
   },
   "activationEvents": [
     "onLanguage:json",
-    "onLanguage:jsonc"
+    "onLanguage:jsonc",
+    "onLanguage:yaml"
   ],
   "main": "./out/extension.js",
   "contributes": {
